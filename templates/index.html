@@ -1,0 +1,620 @@
+<!-- <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Delivery Route Optimizer</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f4f4f9;
+            height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            width: 100%;
+            padding: 10px;
+            box-sizing: border-box;
+            background-color: #fff;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            margin: 10px;
+            border-radius: 8px;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            font-size: 24px;
+        }
+        form {
+            display: flex;
+            flex-direction: column;
+            margin-bottom: 10px;
+        }
+        .input-box {
+            display: flex;
+            flex-direction: column;
+            margin-bottom: 8px;
+        }
+        label {
+            margin-bottom: 4px;
+            font-weight: bold;
+            color: #555;
+            font-size: 14px;
+        }
+        input[type="text"],
+        input[type="file"],
+        button {
+            padding: 8px;
+            font-size: 14px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        input[type="text"]:focus,
+        input[type="file"]:focus,
+        button:focus {
+            outline: none;
+            border-color: #007bff;
+        }
+        #add-location {
+            width: 40px;
+            align-self: flex-start;
+            margin-top: 6px;
+            background-color: #007bff;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        #add-location:hover {
+            background-color: #0056b3;
+        }
+        .content {
+            display: flex;
+            flex-direction: row;
+            justify-content: space-between;
+            margin-top: 10px;
+        }
+        #map {
+            height: 400px;
+            width: 68%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        #metrics {
+            width: 30%;
+            margin-left: 2%;
+        }
+        button[type="submit"] {
+            background-color: #28a745;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button[type="submit"]:hover {
+            background-color: #218838;
+        }
+        @media (max-width: 768px) {
+            .content {
+                flex-direction: column;
+                align-items: center;
+            }
+            #map {
+                width: 100%;
+                margin-bottom: 10px;
+            }
+            #metrics {
+                width: 100%;
+                margin-left: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Delivery Route Optimizer</h1>
+        <form id="coordinate-form" method="post" enctype="multipart/form-data">
+            <div class="input-box">
+                <label for="hub-coordinates">Central Dispatch Hub Coordinates:</label>
+                <input type="text" id="hub-coordinates" name="hub-coordinates">
+            </div>
+            <div id="manual-inputs">
+                <div id="delivery-locations">
+                    <div class="input-box">
+                        <label for="location-1">Delivery Location 1 Coordinates:</label>
+                        <input type="text" id="location-1" name="location-1" class="delivery-location">
+                    </div>
+                </div>
+                <button type="button" id="add-location">+</button>
+            </div>
+            <div class="input-box">
+                <label for="csv-upload">Upload CSV:</label>
+                <input type="file" id="csv-upload" name="csv-upload" accept=".csv">
+            </div>
+            <button type="submit">Submit</button>
+        </form>
+        <div class="content">
+            <div id="map"></div>
+            <div id="metrics"></div>
+        </div>
+    </div>
+    <script>
+        let locationCount = 1;
+
+        document.getElementById('add-location').addEventListener('click', () => {
+            locationCount++;
+            const div = document.createElement('div');
+            div.classList.add('input-box');
+            div.innerHTML = `
+                <label for="location-${locationCount}">Delivery Location ${locationCount} Coordinates:</label>
+                <input type="text" id="location-${locationCount}" name="location-${locationCount}" class="delivery-location">
+            `;
+            document.getElementById('delivery-locations').appendChild(div);
+        });
+
+        document.getElementById('csv-upload').addEventListener('change', () => {
+            const manualInputs = document.getElementById('manual-inputs');
+            const csvUpload = document.getElementById('csv-upload');
+            if (csvUpload.files.length > 0) {
+                manualInputs.style.display = 'none';
+            } else {
+                manualInputs.style.display = 'block';
+            }
+        });
+
+        var map = L.map('map').setView([10.2182, 78.1818], 7);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        var hubIcon = L.icon({
+            iconUrl: '{{ url_for("static", filename="images/hub-icon.png") }}',
+            iconSize: [32, 32], 
+            iconAnchor: [16, 32], 
+        });
+
+        var deliveryIcon = L.icon({
+            iconUrl: '{{ url_for("static", filename="images/delivery-icon.png") }}',
+            iconSize: [32, 32], 
+            iconAnchor: [16, 32], 
+        });
+
+        var riderIcon = L.icon({
+            iconUrl: '{{ url_for("static", filename="images/rider.png") }}',
+            iconSize: [32, 32],
+            iconAnchor: [16, 32], 
+        });
+
+        const colors = ['red', 'blue', 'green', 'orange', 'purple', 'yellow', 'pink', 'brown', 'gray', 'black'];
+
+        document.getElementById('coordinate-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const formData = new FormData(this);
+            fetch(window.location.href, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log("Received data:", data);
+                const routes = data.routes;
+                const metrics = data.metrics;
+
+                const routeCoords = {}; 
+                routes.forEach(route => {
+                    const [lat, lon] = [parseFloat(route.coords.lat), parseFloat(route.coords.lon)];
+                    let markerIcon;
+                    if (route.type === 'hub') {
+                        markerIcon = hubIcon;
+                    } else {
+                        markerIcon = deliveryIcon;
+                    }
+                    L.marker([lat, lon], { icon: markerIcon })
+                        .bindPopup(route.type === 'hub' ? 'Dispatch Hub' : `Delivery Location ${route.index}`)
+                        .addTo(map)
+                        .on('click', function(e) {
+                            map.setView([lat, lon], 15);
+                        });
+
+                    if (!routeCoords[route.route]) {
+                        routeCoords[route.route] = [];
+                    }
+                    routeCoords[route.route].push([lat, lon]);
+                });
+
+                const metricsContainer = document.getElementById('metrics');
+                metricsContainer.innerHTML = '<h2>Route Metrics</h2>';
+
+                Object.keys(routeCoords).forEach((route, idx) => {
+                    const waypoints = routeCoords[route].map(coord => L.latLng(coord[0], coord[1]));
+                    const polyline = L.Routing.control({
+                        waypoints: waypoints,
+                        routeWhileDragging: false,
+                        addWaypoints: false,
+                        show: false,
+                        lineOptions: {
+                            styles: [{ color: colors[idx % colors.length], weight: 5 }]
+                        },
+                        createMarker: function() { return null; }
+                    }).addTo(map);
+
+                    const playButton = document.createElement('button');
+                    playButton.innerText = 'Play';
+                    playButton.style.marginLeft = '10px';
+                    playButton.addEventListener('click', () => playRoute(polyline, waypoints));
+
+                    const routeMetrics = document.createElement('div');
+                    routeMetrics.style.marginBottom = '10px';
+                    routeMetrics.innerHTML = `Route ${idx + 1}: Distance = ${metrics[idx][0].toFixed(2)} km, Time = ${metrics[idx][1].toFixed(2)} minutes`;
+                    routeMetrics.appendChild(playButton);
+
+                    metricsContainer.appendChild(routeMetrics);
+                });
+
+
+                document.getElementById('hub-coordinates').focus();
+            })
+            .catch(error => {
+                console.error("Error:", error);
+            });
+        });
+
+        function playRoute(routeControl, waypoints) {
+            const route = routeControl.getPlan().getWaypoints().map(wp => [wp.latLng.lat, wp.latLng.lng]);
+            const riderMarker = L.marker(route[0], { icon: riderIcon }).addTo(map);
+
+            let step = 0;
+            const totalSteps = 500;
+            const delay = 20;
+
+            function moveRider() {
+                if (step < totalSteps) {
+                    const progress = step / totalSteps;
+                    const nextIndex = Math.floor(progress * (route.length - 1));
+                    const [startLat, startLng] = route[nextIndex];
+                    const [endLat, endLng] = route[nextIndex + 1];
+                    const segmentProgress = (progress * (route.length - 1)) % 1;
+
+                    const newLat = startLat + (endLat - startLat) * segmentProgress;
+                    const newLng = startLng + (endLng - startLng) * segmentProgress;
+
+                    riderMarker.setLatLng([newLat, newLng]);
+
+                    step++;
+                    setTimeout(moveRider, delay);
+                } else {
+                    riderMarker.remove();
+                }
+            }
+
+            moveRider();
+        }
+    </script>
+</body>
+</html> -->
+
+<!-- ==================================================================================================================================================================== -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Delivery Route Optimizer</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f4f4f9;
+            height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            width: 100%;
+            padding: 10px;
+            box-sizing: border-box;
+            background-color: #fff;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            margin: 10px;
+            border-radius: 8px;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            font-size: 24px;
+        }
+        form {
+            display: flex;
+            flex-direction: column;
+            margin-bottom: 10px;
+        }
+        .input-box {
+            display: flex;
+            flex-direction: column;
+            margin-bottom: 8px;
+        }
+        label {
+            margin-bottom: 4px;
+            font-weight: bold;
+            color: #555;
+            font-size: 14px;
+        }
+        input[type="text"],
+        input[type="file"],
+        button {
+            padding: 8px;
+            font-size: 14px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        input[type="text"]:focus,
+        input[type="file"]:focus,
+        button:focus {
+            outline: none;
+            border-color: #007bff;
+        }
+        #add-location {
+            width: 40px;
+            align-self: flex-start;
+            margin-top: 6px;
+            background-color: #007bff;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        #add-location:hover {
+            background-color: #0056b3;
+        }
+        .content {
+            display: flex;
+            flex-direction: row;
+            justify-content: space-between;
+            margin-top: 10px;
+        }
+        #map {
+            height: 400px;
+            width: 68%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        #metrics {
+            width: 30%;
+            margin-left: 2%;
+        }
+        button[type="submit"] {
+            background-color: #28a745;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button[type="submit"]:hover {
+            background-color: #218838;
+        }
+        @media (max-width: 768px) {
+            .content {
+                flex-direction: column;
+                align-items: center;
+            }
+            #map {
+                width: 100%;
+                margin-bottom: 10px;
+            }
+            #metrics {
+                width: 100%;
+                margin-left: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Delivery Route Optimizer</h1>
+        <form id="coordinate-form" method="post" enctype="multipart/form-data">
+            <div class="input-box">
+                <label for="hub-coordinates">Central Dispatch Hub Coordinates:</label>
+                <input type="text" id="hub-coordinates" name="hub-coordinates">
+            </div>
+            <div id="manual-inputs">
+                <div id="delivery-locations">
+                    <div class="input-box">
+                        <label for="location-1">Delivery Location 1 Coordinates:</label>
+                        <input type="text" id="location-1" name="location-1" class="delivery-location">
+                    </div>
+                </div>
+                <button type="button" id="add-location">+</button>
+            </div>
+            <div class="input-box">
+                <label for="csv-upload">Upload CSV:</label>
+                <input type="file" id="csv-upload" name="csv-upload" accept=".csv">
+            </div>
+            <button type="submit">Submit</button>
+        </form>
+        <div class="content">
+            <div id="map"></div>
+            <div id="metrics"></div>
+        </div>
+    </div>
+    <script>
+        let locationCount = 1;
+
+        document.getElementById('add-location').addEventListener('click', () => {
+            locationCount++;
+            const div = document.createElement('div');
+            div.classList.add('input-box');
+            div.innerHTML = `
+                <label for="location-${locationCount}">Delivery Location ${locationCount} Coordinates:</label>
+                <input type="text" id="location-${locationCount}" name="location-${locationCount}" class="delivery-location">
+            `;
+            document.getElementById('delivery-locations').appendChild(div);
+        });
+
+        document.getElementById('csv-upload').addEventListener('change', () => {
+            const manualInputs = document.getElementById('manual-inputs');
+            const csvUpload = document.getElementById('csv-upload');
+            if (csvUpload.files.length > 0) {
+                manualInputs.style.display = 'none';
+            } else {
+                manualInputs.style.display = 'block';
+            }
+        });
+
+        var map = L.map('map').setView([10.2182, 78.1818], 7);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        var hubIcon = L.icon({
+            iconUrl: '{{ url_for("static", filename="images/hub-icon.png") }}',
+            iconSize: [32, 32], 
+            iconAnchor: [16, 32], 
+        });
+
+        var deliveryIcon = L.icon({
+            iconUrl: '{{ url_for("static", filename="images/delivery-icon.png") }}',
+            iconSize: [32, 32], 
+            iconAnchor: [16, 32], 
+        });
+
+        var riderIcon = L.icon({
+            iconUrl: '{{ url_for("static", filename="images/rider.png") }}',
+            iconSize: [32, 32],
+            iconAnchor: [16, 32], 
+        });
+
+        const colors = ['red', 'blue', 'green', 'orange', 'purple', 'yellow', 'pink', 'brown', 'gray', 'black'];
+
+        document.getElementById('coordinate-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+
+    const formData = new FormData(this);
+    fetch(window.location.href, {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log("Received data:", data);
+        const routes = data.routes;
+        const metrics = data.metrics;
+
+        const routeCoords = {};
+        routes.forEach(route => {
+            const [lat, lon] = [parseFloat(route.coords.lat), parseFloat(route.coords.lon)];
+            let markerIcon;
+            let popupContent;
+
+            if (route.type === 'hub') {
+                markerIcon = hubIcon;
+                popupContent = 'Dispatch Hub';
+            } else {
+                markerIcon = deliveryIcon;
+                popupContent = `Delivery Location ${route.index}`;
+            }
+
+            L.marker([lat, lon], { icon: markerIcon })
+                .bindPopup(popupContent)
+                .addTo(map)
+                .on('click', function(e) {
+                    map.setView([lat, lon], 15);
+                });
+
+            if (!routeCoords[route.route]) {
+                routeCoords[route.route] = [];
+            }
+            routeCoords[route.route].push([lat, lon]);
+        });
+
+        const metricsContainer = document.getElementById('metrics');
+        metricsContainer.innerHTML = '<h2>Route Metrics</h2>';
+
+        Object.keys(routeCoords).forEach((route, idx) => {
+            const waypoints = routeCoords[route].map(coord => L.latLng(coord[0], coord[1]));
+            const polyline = L.Routing.control({
+                waypoints: waypoints,
+                routeWhileDragging: false,
+                addWaypoints: false,
+                show: false,
+                lineOptions: {
+                    styles: [{ color: colors[idx % colors.length], weight: 5 }]
+                },
+                createMarker: function() { return null; }
+            }).addTo(map);
+
+            const playButton = document.createElement('button');
+            playButton.innerText = 'Play';
+            playButton.style.marginLeft = '10px';
+            playButton.addEventListener('click', () => playRoute(polyline, waypoints));
+
+            const routeMetrics = document.createElement('div');
+            routeMetrics.style.marginBottom = '10px';
+            routeMetrics.innerHTML = `Route ${idx + 1}: Distance = ${metrics[idx][0].toFixed(2)} km, Time = ${metrics[idx][1].toFixed(2)} minutes`;
+            routeMetrics.appendChild(playButton);
+
+            metricsContainer.appendChild(routeMetrics);
+        });
+
+        document.getElementById('hub-coordinates').focus();
+    })
+    .catch(error => {
+        console.error("Error:", error);
+    });
+});
+
+
+        function playRoute(routeControl, waypoints) {
+            const route = routeControl.getPlan().getWaypoints().map(wp => [wp.latLng.lat, wp.latLng.lng]);
+            const riderMarker = L.marker(route[0], { icon: riderIcon }).addTo(map);
+
+            let step = 0;
+            const totalSteps = 500;
+            const delay = 20;
+
+            function moveRider() {
+                if (step < totalSteps) {
+                    const progress = step / totalSteps;
+                    const nextIndex = Math.floor(progress * (route.length - 1));
+                    const [startLat, startLng] = route[nextIndex];
+                    const [endLat, endLng] = route[nextIndex + 1];
+                    const segmentProgress = (progress * (route.length - 1)) % 1;
+
+                    const newLat = startLat + (endLat - startLat) * segmentProgress;
+                    const newLng = startLng + (endLng - startLng) * segmentProgress;
+
+                    riderMarker.setLatLng([newLat, newLng]);
+
+                    step++;
+                    setTimeout(moveRider, delay);
+                } else {
+                    riderMarker.remove();
+                }
+            }
+
+            moveRider();
+        }
+    </script>
+</body>
+</html>
+
+<!-- ======================================================================================================== -->
